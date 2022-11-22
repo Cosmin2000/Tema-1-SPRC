@@ -18,19 +18,33 @@
 
 using namespace std;
 
+struct credentials {
+	string auth_token;
+	string access_token;
+	string refresh_token;
+	map<string, string> perms;
+};
+
+// typedef struct credentials credentials;
+// coada cu permisiuni
+queue<map<string,string>> approvals_queue;
+// userid - map(set de permisiuni <resursa, permisiuni>)
+map<string, map<string, string>> perms_map;
 set<string> users;
 set<string> resources;
 // auth token - userid
 map<string, string> auth_userid_tokens;
 //userid - auth token
 map<string, string> userid_auth_tokens;
-// userid - map(set de permisiuni <resursa, permisiuni>)
-map<string, map<string, string>> perms_map;
+
+
 // access token - <userid, ttl>
 map<string, pair<string, int>> access_userid_tokens;
 // userid - <access token, refresh_token>
 map<string, pair<string, string>>  userid_access_tokens;
-ifstream approvals;
+
+unordered_map<string, credentials> users_credentials;
+
 int valability;
 
 char **
@@ -47,6 +61,7 @@ request_authorization_1_svc(char **argp, struct svc_req *rqstp)
 		printf("  RequestToken = %s\n", result);
 	} else {
 		result = strdup("USER_NOT_FOUND");
+		return &result;
 	}
 
 	auth_userid_tokens.insert({result, *argp});
@@ -58,6 +73,15 @@ request_authorization_1_svc(char **argp, struct svc_req *rqstp)
 		entry->second = result;
 
 	}
+
+	// credentials cr;
+	// map<string, string> empty;
+	// cr.access_token = "";
+	// cr.auth_token = "";
+	// cr.perms = empty;
+	// cr.refresh_token = "";
+	// cr.perms = empty;
+	// users_credentials.insert(pair<string, Credentials>(*argp, Credentials()));
 	return &result;
 }
 
@@ -105,7 +129,6 @@ request_acces_token_1_svc(access_request *argp, struct svc_req *rqstp)
 	} 
 
 	string old_auth_token = userid_auth_tokens.find(argp->id)->second;
-	// printf("Am primit pentru ACCESS : OLD: %s  ACC: %s\n", old_auth_token.c_str(), argp->auth_token);
 
 	if (strcmp(old_auth_token.c_str(), argp->auth_token) && !refresh_op_initialized) {
 		result = generate_access_refresh_tokens(argp);
@@ -172,25 +195,11 @@ approve_request_token_1_svc(char **argp, struct svc_req *rqstp)
 	int nr_resources = 0;
 	map<string, string> curr_res_map;
 
-	// scriem sau suprascriem(daca avem cerere noua) permisiunile;
-	if (approvals.is_open()) {
-		// citesc intrarea de approvals
-		if(getline(approvals, res_line)) {
-			stringstream check(res_line);
-			// impart linia in fiecare resursa si permisiuni
-			while(getline(check, res, ',') && getline(check, perms, ',')) {
-				// utilizatorul nu aproba cererea
-				if (!res.compare("*")) {
-					break;
-				}
-				curr_res_map.insert({res, perms});
-				nr_resources++;
-			}
-		}
-	}
-	
+	// luam permisiunile curente
+	curr_res_map = approvals_queue.front();
+	approvals_queue.pop();
 
-	if (nr_resources == 0) {
+	if (curr_res_map.empty()) {
 		result = strdup(*argp);
 	} else {
 		string userid = auth_userid_tokens.find(*argp)->second;
@@ -208,22 +217,14 @@ approve_request_token_1_svc(char **argp, struct svc_req *rqstp)
 	return &result;
 }
 
-
-
-
-int
-main (int argc, char **argv)
+void parse_input(char *users_file, char *resources_file, char *approvals_file)
 {
-	register SVCXPRT *transp;
-
-	// FILE *fd_clienti, *fd_resurse, *fd_aprobari;
 	int rc, nr_clienti, nr_resources;
 	string id, resource_name;
-	setbuf(stdout, NULL);
+	string res_line;
+	string res, perms;
 
-	valability = atoi(argv[4]);
-
-	ifstream fd_users(argv[1]);
+	ifstream fd_users(users_file);
 	if (fd_users.is_open()) {
 		getline(fd_users, id);
 		nr_clienti = atoi(id.c_str());
@@ -233,7 +234,7 @@ main (int argc, char **argv)
 		}
 	}
 
-	ifstream fd_resources(argv[2]);
+	ifstream fd_resources(resources_file);
 	if (fd_resources.is_open()) {
 		getline(fd_resources, resource_name);
 		nr_resources = atoi(resource_name.c_str());
@@ -243,8 +244,39 @@ main (int argc, char **argv)
 		}
 	}
 
-	approvals.open(argv[3]);
-	
+	ifstream approvals(approvals_file);
+	if (approvals.is_open()) {
+		while(getline(approvals, res_line)) {
+			stringstream check(res_line);
+			map<string, string> curr_res_map;
+			// impart linia in fiecare resursa si permisiuni
+			while(getline(check, res, ',') && getline(check, perms, ',')) {
+				// utilizatorul nu aproba cererea
+				if (!res.compare("*")) {
+					break;
+				} else {
+					curr_res_map.insert({res, perms});
+				}
+				// nr_resources++;
+			}
+			approvals_queue.push(curr_res_map);
+		}
+	}
+}
+
+
+
+int
+main (int argc, char **argv)
+{
+	register SVCXPRT *transp;
+
+	setbuf(stdout, NULL);
+
+	valability = atoi(argv[4]);
+
+	parse_input(argv[1], argv[2], argv[3]);
+
 	pmap_unset (TEMAPROG, TEMAVERS);
 
 	transp = svcudp_create(RPC_ANYSOCK);

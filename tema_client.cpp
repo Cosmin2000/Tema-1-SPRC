@@ -14,7 +14,9 @@
 using namespace std;
 
 // userid - < <access token, refresh_token> , ttl >
-map<string, pair<pair<string,string>, int>> userid_access_tokens;
+// map<string, pair<pair<string,string>, int>> userid_access_tokens;
+map<string, access_response> userid_access_tokens;
+
 
 
 void make_request_access(access_request  *request_access, CLIENT *clnt, char *user, char **auth_token) {
@@ -32,10 +34,13 @@ void make_request_access(access_request  *request_access, CLIENT *clnt, char *us
 		auto userid_access_entry = userid_access_tokens.find(user);
 		// Verific daca exista deja un access token pentru acest user
 		if (userid_access_entry == userid_access_tokens.end()) {
-			userid_access_tokens.insert({user, {{request_access_response->access_token, request_access_response->refresh_token}, request_access_response->ttl}});
+			// userid_access_tokens.insert({user, {{request_access_response->access_token, request_access_response->refresh_token}, request_access_response->ttl}});
+			userid_access_tokens.insert({user, *request_access_response});
+
 		} else {
-			userid_access_entry->second.first = {request_access_response->access_token, request_access_response->refresh_token};
-			userid_access_entry->second.second = request_access_response->ttl;
+			// userid_access_entry->second.first = {request_access_response->access_token, request_access_response->refresh_token};
+			// userid_access_entry->second.second = request_access_response->ttl;
+			userid_access_entry->second = *request_access_response;
 
 		}
 
@@ -64,7 +69,6 @@ void make_request(char *user, CLIENT *clnt, int generate_refresh_token) {
 	if (auth_token == (char **) NULL) {
 		clnt_perror (clnt, "call failed");
 	}
-	// printf("Request Token: %s\n ", *auth_token);
 	
 	if (strcmp(*auth_token, "USER_NOT_FOUND")) {
 		// Facem cererea de aprobare 
@@ -114,22 +118,19 @@ temaprog_1(char *host, char *fd_op)
 			op = strtok(NULL, ",");
 			value = strtok(NULL,",");
 
-			// cout << user << " " << op << " " << value << endl;
-		
 			if (!op.compare("REQUEST")) { // Avem REQUEST
 				make_request(user, clnt, atoi(value));
 			} else { // Avem cerere de resursa
 				auto found = userid_access_tokens.find(user);
 				if (found != userid_access_tokens.end()) {
 					// daca expira si are refresh token
-					if (found->second.second == 0 && found->second.first.second.compare("")) {
+					if (found->second.ttl == 0 && strcmp(found->second.refresh_token,"")) {
 						request_access.id = strdup(user);
-						request_access.auth_token = strdup(found->second.first.second.c_str());
+						request_access.auth_token = strdup(found->second.refresh_token);
 						request_access.generate_refresh_token = 1;
-						// printf("FACE REFRESH %s %s %d\n", request_access.id,request_access.auth_token, request_access.generate_refresh_token);
 						make_request_access(&request_access, clnt, user, NULL);
 					}
-					resource_request_params.acces_token = (char*)userid_access_tokens.find(user)->second.first.first.c_str();
+					resource_request_params.acces_token = (char*)userid_access_tokens.find(user)->second.access_token;
 				} else {
 					resource_request_params.acces_token = strdup("");
 				}
@@ -143,7 +144,7 @@ temaprog_1(char *host, char *fd_op)
 				}
 				printf("%s\n", *resource_server_response);
 				if (strcmp(*resource_server_response, "PERMISSION_DENIED") && userid_access_tokens.find(user) != userid_access_tokens.end()) {
-					userid_access_tokens.find(user)->second.second--;
+					userid_access_tokens.find(user)->second.ttl--;
 				}
 			}
 		}
