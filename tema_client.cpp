@@ -13,11 +13,8 @@
 
 using namespace std;
 
-// userid - < <access token, refresh_token> , ttl >
-// map<string, pair<pair<string,string>, int>> userid_access_tokens;
+// userid - < access token, refresh_token, ttl >
 map<string, access_response> userid_access_tokens;
-
-
 
 void make_request_access(access_request  *request_access, CLIENT *clnt, char *user, char **auth_token) {
 	access_response  *request_access_response;
@@ -29,22 +26,19 @@ void make_request_access(access_request  *request_access, CLIENT *clnt, char *us
 		clnt_perror (clnt, "call failed");
 	}
 
-	// NU am primit REQUEST_DENIED
+	// Am primit ACCESS
 	if(strcmp(request_access_response->access_token, "REQUEST_DENIED")) {
 		auto userid_access_entry = userid_access_tokens.find(user);
 		// Verific daca exista deja un access token pentru acest user
 		if (userid_access_entry == userid_access_tokens.end()) {
-			// userid_access_tokens.insert({user, {{request_access_response->access_token, request_access_response->refresh_token}, request_access_response->ttl}});
+			// Nu exista
 			userid_access_tokens.insert({user, *request_access_response});
-
 		} else {
-			// userid_access_entry->second.first = {request_access_response->access_token, request_access_response->refresh_token};
-			// userid_access_entry->second.second = request_access_response->ttl;
 			userid_access_entry->second = *request_access_response;
-
 		}
 
-		// Daca nu e refresh initiat
+		// Daca la request access nu folosesc tokenul de autentificare (folosesc pe cel de refresh)
+		//  e cerere de refresh si nu printez
 		if (auth_token != NULL) {
 			printf("%s -> %s", *auth_token,request_access_response->access_token);
 			if (request_access->generate_refresh_token) {
@@ -76,6 +70,7 @@ void make_request(char *user, CLIENT *clnt, int generate_refresh_token) {
 		if (signed_token == (char **) NULL) {
 			clnt_perror (clnt, "call failed");
 		}
+		// dupa aprobare, fac cerere de acces
 		request_access.id = strdup(user);
 		request_access.auth_token = strdup(*signed_token);
 		request_access.generate_refresh_token = generate_refresh_token;
@@ -89,14 +84,12 @@ void
 temaprog_1(char *host, char *fd_op)
 {
 	CLIENT *clnt;
-	char * *auth_token;
-	char * request_authorization_1_arg;
+	char **auth_token;
 	access_response  *request_access_response;
 	access_request  request_access;
-	char * *resource_server_response;
-	action  resource_request_params;
-	char * *signed_token;
-	char * approve_request_token_1_arg;
+	char **resource_server_response;
+	action_request  resource_request_params;
+	char **signed_token;
 
 #ifndef	DEBUG
 	clnt = clnt_create (host, TEMAPROG, TEMAVERS, "udp");
@@ -123,18 +116,18 @@ temaprog_1(char *host, char *fd_op)
 			} else { // Avem cerere de resursa
 				auto found = userid_access_tokens.find(user);
 				if (found != userid_access_tokens.end()) {
-					// daca expira si are refresh token
+					// daca expira token-ul si are refresh token nenul
 					if (found->second.ttl == 0 && strcmp(found->second.refresh_token,"")) {
 						request_access.id = strdup(user);
 						request_access.auth_token = strdup(found->second.refresh_token);
 						request_access.generate_refresh_token = 1;
 						make_request_access(&request_access, clnt, user, NULL);
 					}
+
 					resource_request_params.acces_token = (char*)userid_access_tokens.find(user)->second.access_token;
 				} else {
 					resource_request_params.acces_token = strdup("");
 				}
-				
 				resource_request_params.op = (char *)op.c_str();
 				resource_request_params.resource = (char *)value;
 

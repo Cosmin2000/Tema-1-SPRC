@@ -19,31 +19,35 @@
 using namespace std;
 
 struct credentials {
+
+	credentials(string auth_token) : auth_token(auth_token), access_token(), refresh_token(), perms() {} 
+	credentials() : auth_token(), access_token(), refresh_token(), perms() {} 
+
 	string auth_token;
 	string access_token;
 	string refresh_token;
-	map<string, string> perms;
+	unordered_map<string, string> perms;
 };
 
-// typedef struct credentials credentials;
 // coada cu permisiuni
-queue<map<string,string>> approvals_queue;
-// userid - map(set de permisiuni <resursa, permisiuni>)
-map<string, map<string, string>> perms_map;
+queue<unordered_map<string,string>> approvals_queue;
+// set cu userii
 set<string> users;
+// set cu resurse
 set<string> resources;
-// auth token - userid
-map<string, string> auth_userid_tokens;
-//userid - auth token
-map<string, string> userid_auth_tokens;
-
-
+// authorization token - userid
+unordered_map<string, string> auth_userid_tokens;
 // access token - <userid, ttl>
-map<string, pair<string, int>> access_userid_tokens;
-// userid - <access token, refresh_token>
-map<string, pair<string, string>>  userid_access_tokens;
-
+unordered_map<string, pair<string, int>> access_userid_tokens;
+// userid - credentiale
 unordered_map<string, credentials> users_credentials;
+
+/**
+ *  Folosesc inca 2 map-uri "access_userid_tokens" si "access_userid_tokens" pentru ca am nevoie sa 
+ *  aflu informatii nevand la userid-ul si consider ca e mai eficient decat sa fac o cautare iterand
+ *  in map-ul mare de fiecare data.
+ **/
+
 
 int valability;
 
@@ -56,32 +60,26 @@ request_authorization_1_svc(char **argp, struct svc_req *rqstp)
 	auto pos = users.find(*argp);
 	printf("BEGIN %s AUTHZ\n", *argp);
 
+	// Verific daca exista user-ul
 	if (pos != users.end()) {
 		result = generate_access_token(*argp);
 		printf("  RequestToken = %s\n", result);
-	} else {
+	} else { // Nu exista
 		result = strdup("USER_NOT_FOUND");
 		return &result;
 	}
 
+	// adaug o intrare in map-ul auth_userid
 	auth_userid_tokens.insert({result, *argp});
-	auto entry = userid_auth_tokens.find(*argp);
-	// Daca user-ul nu a fost autorizat niciodata
-	if (entry == userid_auth_tokens.end()) {
-		userid_auth_tokens.insert({*argp, result});
+	auto entry = users_credentials.find(*argp);
+	// Daca nu a fost autorizat niciodata
+	if (entry == users_credentials.end()) {
+		users_credentials.insert({*argp, credentials(result)});
 	} else {
-		entry->second = result;
+		entry->second.auth_token = result;
 
 	}
 
-	// credentials cr;
-	// map<string, string> empty;
-	// cr.access_token = "";
-	// cr.auth_token = "";
-	// cr.perms = empty;
-	// cr.refresh_token = "";
-	// cr.perms = empty;
-	// users_credentials.insert(pair<string, Credentials>(*argp, Credentials()));
 	return &result;
 }
 
@@ -89,6 +87,7 @@ access_response *generate_access_refresh_tokens(access_request *argp) {
 	char *access_token, *refresh_token;
 	static access_response  result;
 
+	// generez token-ul de access
 	access_token = generate_access_token(argp->auth_token);
 	result.access_token = strdup(access_token);
 	printf("  AccessToken = %s\n", access_token);
@@ -99,14 +98,11 @@ access_response *generate_access_refresh_tokens(access_request *argp) {
 	} else {
 		result.refresh_token = strdup("");
 	}
+	// adaug token-ul de access si cel de refresh(null daca nu a fost generat)
 	access_userid_tokens.insert({access_token, {argp->id, valability}});
-	auto found_userid_tokens = userid_access_tokens.find(argp->id);
-	// in caz ca deja exista o intrare
-	if (found_userid_tokens != userid_access_tokens.end()) {
-		found_userid_tokens->second = {access_token, result.refresh_token};
-	} else {
-		userid_access_tokens.insert({argp->id, {access_token, result.refresh_token}});
-	}
+	auto user_credentials = users_credentials.find(argp->id);
+	user_credentials->second.access_token = access_token;
+	user_credentials->second.refresh_token = result.refresh_token;
 	result.ttl = valability;
 
 	return &result;
@@ -119,21 +115,25 @@ request_acces_token_1_svc(access_request *argp, struct svc_req *rqstp)
 	static access_response  *result;
 	char *access_token, *refresh_token;
 
-	string old_refresh_token = userid_access_tokens.find(argp->id)->second.second;
+	auto user_credentials = users_credentials.find(argp->id)->second;
+
+	string old_refresh_token = user_credentials.refresh_token;
 	int refresh_op_initialized = !old_refresh_token.compare(argp->auth_token);
 
+	// veific daca e operatie de refresh
 	if (refresh_op_initialized) {
 		printf("BEGIN %s AUTHZ REFRESH\n", argp->id);
 		result = generate_access_refresh_tokens(argp);
 		return result;
 	} 
 
-	string old_auth_token = userid_auth_tokens.find(argp->id)->second;
+	string old_auth_token = user_credentials.auth_token;
 
+	// verific daca tokenul de autentificare e semnat
 	if (strcmp(old_auth_token.c_str(), argp->auth_token) && !refresh_op_initialized) {
 		result = generate_access_refresh_tokens(argp);
 		
-	} else {
+	} else { // nu e semnat
 		result->access_token = strdup("REQUEST_DENIED");
 		result->refresh_token = strdup("");
 	}
@@ -142,27 +142,31 @@ request_acces_token_1_svc(access_request *argp, struct svc_req *rqstp)
 }
 
 char **
-validate_delegated_action_1_svc(action *argp, struct svc_req *rqstp)
+validate_delegated_action_1_svc(action_request *argp, struct svc_req *rqstp)
 {
 	static char * result;
 	string userid;
 
 	auto pos = access_userid_tokens.find(argp->acces_token);
-	// Daca exista perechea userid-access token
+	// Verific daca exista un access token-ul
 	if (pos != access_userid_tokens.end()) {
-		userid = get<0>(pos->second);
+		userid = pos->second.first;
 		auto res = resources.find(argp->resource);
 		if (pos->second.second <= 0) {
+			// Daca a expirat token-ul
 			result = strdup("TOKEN_EXPIRED");
 			strcpy(argp->acces_token, "");
 		} else if (res == resources.end()) {
+			// Nu am gasit resursa in lista de resurse
 			result = strdup("RESOURCE_NOT_FOUND");
 			pos->second.second--;
 		} else {
-			map<string, string> perms = perms_map.find(userid)->second;
+			// permisiunile user-ului
+			unordered_map<string, string> perms = users_credentials.find(userid)->second.perms;
 			auto founded_resources = perms.find(argp->resource);
-			if (founded_resources != perms.cend()) { // am gasit resursa
+			if (founded_resources != perms.cend()) { // am gasit resursa in lista de permisiuni
 				char *rights = (char*)(founded_resources->second).c_str();
+				// Verific daca are drepturi.
 				if ((strchr(rights, argp->op[0]) == NULL && strcmp(argp->op, "EXECUTE")) || (!strcmp(argp->op, "EXECUTE") && strchr(rights, 'X') == NULL)) {
 					result = strdup("OPERATION_NOT_PERMITTED");
 				} else {
@@ -171,8 +175,11 @@ validate_delegated_action_1_svc(action *argp, struct svc_req *rqstp)
 			} else {
 				result = strdup("OPERATION_NOT_PERMITTED");
 			}
+			// scad valabilitatea token-ului
 			pos->second.second--;
 		}
+
+		// Fac afisarile
 		if (!strcmp(result,"PERMISSION_GRANTED")) {
 			printf("PERMIT (%s,%s,%s,%d)\n", argp->op,argp->resource, argp->acces_token, pos->second.second);
 		} else {
@@ -193,26 +200,22 @@ approve_request_token_1_svc(char **argp, struct svc_req *rqstp)
 	string res_line;
 	string res, perms;
 	int nr_resources = 0;
-	map<string, string> curr_res_map;
+	unordered_map<string, string> curr_res_map;
 
-	// luam permisiunile curente
+	// luam permisiunile curente in ordine FIFO
 	curr_res_map = approvals_queue.front();
 	approvals_queue.pop();
 
+	// Daca nu are permisiuni (e linie de tipul "*,-"")
 	if (curr_res_map.empty()) {
 		result = strdup(*argp);
 	} else {
 		string userid = auth_userid_tokens.find(*argp)->second;
-		auto perms_entry = perms_map.find(userid);
-		// cautam sa vedem daca exista deja permisiuni si daca exista le suprascriem
-		if (perms_entry == perms_map.end()) {
-			perms_map.insert({userid, curr_res_map});
-		} else {
-			perms_entry->second = curr_res_map;
-		}
+		// Setam permisunile user-ului curent 
+		users_credentials.find(userid)->second.perms = curr_res_map;
 		
-		// adaug "+" la final pentru a-l considera semnat
-		result = strdup(strcat(*argp, "+"));
+		// adaug "$" la final pentru a-l considera semnat
+		result = strdup(strcat(*argp, "$"));
 	}
 	return &result;
 }
@@ -248,16 +251,15 @@ void parse_input(char *users_file, char *resources_file, char *approvals_file)
 	if (approvals.is_open()) {
 		while(getline(approvals, res_line)) {
 			stringstream check(res_line);
-			map<string, string> curr_res_map;
+			unordered_map<string, string> curr_res_map;
 			// impart linia in fiecare resursa si permisiuni
 			while(getline(check, res, ',') && getline(check, perms, ',')) {
-				// utilizatorul nu aproba cererea
+				// utilizatorul nu aproba cererea => map gol
 				if (!res.compare("*")) {
 					break;
 				} else {
 					curr_res_map.insert({res, perms});
 				}
-				// nr_resources++;
 			}
 			approvals_queue.push(curr_res_map);
 		}

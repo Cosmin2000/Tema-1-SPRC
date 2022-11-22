@@ -34,7 +34,7 @@ xdr_access_request (XDR *xdrs, access_request *objp)
 }
 
 bool_t
-xdr_action (XDR *xdrs, action *objp)
+xdr_action_request (XDR *xdrs, action_request *objp)
 {
 	register int32_t *buf;
 

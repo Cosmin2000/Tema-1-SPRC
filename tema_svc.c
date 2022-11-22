@@ -22,7 +22,7 @@ temaprog_1(struct svc_req *rqstp, register SVCXPRT *transp)
 	union {
 		char *request_authorization_1_arg;
 		access_request request_acces_token_1_arg;
-		action validate_delegated_action_1_arg;
+		action_request validate_delegated_action_1_arg;
 		char *approve_request_token_1_arg;
 	} argument;
 	char *result;
@@ -47,7 +47,7 @@ temaprog_1(struct svc_req *rqstp, register SVCXPRT *transp)
 		break;
 
 	case VALIDATE_DELEGATED_ACTION:
-		_xdr_argument = (xdrproc_t) xdr_action;
+		_xdr_argument = (xdrproc_t) xdr_action_request;
 		_xdr_result = (xdrproc_t) xdr_wrapstring;
 		local = (char *(*)(char *, struct svc_req *)) validate_delegated_action_1_svc;
 		break;

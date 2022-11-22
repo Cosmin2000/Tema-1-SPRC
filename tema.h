@@ -28,14 +28,14 @@ struct access_request {
 };
 typedef struct access_request access_request;
 
-struct action {
+struct action_request {
 	char *op;
 	char *resource;
 	char *acces_token;
 };
-typedef struct action action;
+typedef struct action_request action_request;
 
-#define TEMAPROG 0x32345678
+#define TEMAPROG 1
 #define TEMAVERS 1
 
 #if defined(__STDC__) || defined(__cplusplus)
@@ -46,8 +46,8 @@ extern  char ** request_authorization_1_svc(char **, struct svc_req *);
 extern  access_response * request_acces_token_1(access_request *, CLIENT *);
 extern  access_response * request_acces_token_1_svc(access_request *, struct svc_req *);
 #define VALIDATE_DELEGATED_ACTION 3
-extern  char ** validate_delegated_action_1(action *, CLIENT *);
-extern  char ** validate_delegated_action_1_svc(action *, struct svc_req *);
+extern  char ** validate_delegated_action_1(action_request *, CLIENT *);
+extern  char ** validate_delegated_action_1_svc(action_request *, struct svc_req *);
 #define APPROVE_REQUEST_TOKEN 4
 extern  char ** approve_request_token_1(char **, CLIENT *);
 extern  char ** approve_request_token_1_svc(char **, struct svc_req *);
@@ -74,12 +74,12 @@ extern int temaprog_1_freeresult ();
 #if defined(__STDC__) || defined(__cplusplus)
 extern  bool_t xdr_access_response (XDR *, access_response*);
 extern  bool_t xdr_access_request (XDR *, access_request*);
-extern  bool_t xdr_action (XDR *, action*);
+extern  bool_t xdr_action_request (XDR *, action_request*);
 
 #else /* K&R C */
 extern bool_t xdr_access_response ();
 extern bool_t xdr_access_request ();
-extern bool_t xdr_action ();
+extern bool_t xdr_action_request ();
 
 #endif /* K&R C */
 
